@@ -328,7 +328,12 @@ func (m VariableParsingMode) Parse(name, value string) (cty.Value, hcl.Diagnosti
 // that imposes the additional rule that the condition expression can refer
 // only to an input variable of the given name.
 func decodeVariableValidationBlock(varName string, block *hcl.Block, override bool) (*CheckRule, hcl.Diagnostics) {
-	vv, diags := decodeCheckRuleBlock(block, override)
+	return decodeCheckRuleBlock(block, override)
+}
+
+func checkVariableValidationBlock(varName string, vv *CheckRule) hcl.Diagnostics {
+	var diags hcl.Diagnostics
+
 	if vv.Condition != nil {
 		// The validation condition can only refer to the variable itself,
 		// to ensure that the variable declaration can't create additional
@@ -387,7 +392,7 @@ func decodeVariableValidationBlock(varName string, block *hcl.Block, override bo
 		}
 	}
 
-	return vv, diags
+	return diags
 }
 
 // Output represents an "output" block in a module or file.
