@@ -921,7 +921,7 @@ func TestApply_planWithVarFile(t *testing.T) {
 
 func TestApply_planWithVarFileChangingVariableValue(t *testing.T) {
 	varFileDir := testTempDir(t)
-	varFilePath := filepath.Join(varFileDir, "terraform.tfvars")
+	varFilePath := filepath.Join(varFileDir, "terraform-test.tfvars")
 	if err := os.WriteFile(varFilePath, []byte(applyVarFile), 0644); err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -950,6 +950,7 @@ func TestApply_planWithVarFileChangingVariableValue(t *testing.T) {
 
 	args := []string{
 		"-state-out", statePath,
+		"-var-file", varFilePath,
 		planPath,
 	}
 	code := c.Run(args)
@@ -964,16 +965,10 @@ func TestApply_planWithVarFileChangingVariableValue(t *testing.T) {
 	}
 }
 
-func TestApply_planVars(t *testing.T) {
-	// This test ensures that it isn't allowed to set non-ephemeral input
-	// variables when applying from a saved plan file, since in that case the
-	// variable values come from the saved plan file.
-	//
-	// This situation was originally checked by the apply command itself,
-	// and that's what this test was originally exercising. This rule
-	// is now enforced by the "local" backend instead, but this test
-	// is still valid since the command instance delegates to the
-	// local backend.
+func TestApply_planUndeclaredVars(t *testing.T) {
+	// This test ensures that it isn't allowed to set undeclared input variables
+	// when applying from a saved plan file, since in that case the variable
+	// values come from the saved plan file.
 
 	planPath := applyFixturePlanFile(t)
 	statePath := testTempFile(t)
@@ -1076,7 +1071,6 @@ foo = "bar"
 
 		"with planfile passing ephemeral variable through environment variable": func(t *testing.T, c *ApplyCommand, statePath, planPath string, done func(*testing.T) *terminal.TestOutput) {
 			t.Setenv("TF_VAR_foo", "bar")
-			defer t.Setenv("TF_VAR_foo", "")
 
 			args := []string{
 				"-state", statePath,
@@ -1168,7 +1162,7 @@ foo = "bar"
 
 		"without planfile passing ephemeral variable through environment variable": func(t *testing.T, c *ApplyCommand, statePath, planPath string, done func(*testing.T) *terminal.TestOutput) {
 			t.Setenv("TF_VAR_foo", "bar")
-			defer t.Setenv("TF_VAR_foo", "")
+			t.Setenv("TF_VAR_unused", `{key:"val"}`)
 
 			args := []string{
 				"-state", statePath,
@@ -1361,6 +1355,52 @@ func TestApply_changedVars_applyTime(t *testing.T) {
 
 		if !strings.Contains(output.Stderr(), `Can't change variable when applying a saved plan`) {
 			t.Fatalf("missing undeclared warning:\n%s", output.All())
+		}
+	})
+
+	t.Run("var-file-override-auto", func(t *testing.T) {
+		// for this one we're going to do a full plan to make sure the variables
+		// can be applied consistently. The plan specifies a var file, and
+		// during apply we don't want to override that with the default or auto
+		// var files.
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("apply-vars-auto"), td)
+		defer testChdir(t, td)()
+
+		p := planVarsFixtureProvider()
+		view, done := testView(t)
+		c := &PlanCommand{
+			Meta: Meta{
+				testingOverrides: metaOverridesForProvider(p),
+				View:             view,
+			},
+		}
+
+		args := []string{
+			"-var-file", "terraform-test.tfvars",
+			"-out", "planfile",
+		}
+		code := c.Run(args)
+		output := done(t)
+		if code != 0 {
+			t.Fatalf("non-zero exit %d\n\n%s", code, output.Stderr())
+		}
+
+		view, done = testView(t)
+		apply := &ApplyCommand{
+			Meta: Meta{
+				testingOverrides: metaOverridesForProvider(p),
+				Ui:               new(cli.MockUi),
+				View:             view,
+			},
+		}
+		args = []string{
+			"planfile",
+		}
+		code = apply.Run(args)
+		output = done(t)
+		if code != 0 {
+			t.Fatalf("non-zero exit %d\n\n%s", code, output.Stderr())
 		}
 	})
 }
